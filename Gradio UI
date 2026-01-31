@@ -1,0 +1,92 @@
+import gradio as gr
+import pandas as pd
+import os
+import base64
+
+# Helper function to convert image to base64 string
+def get_base64_image(image_path):
+    if not os.path.exists(image_path):
+        return None
+    with open(image_path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode()
+        return f"data:image/png;base64,{encoded_string}"
+
+def get_timetable_html():
+    file_path = "timetable_output.csv"
+    
+    if not os.path.exists(file_path):
+        return f"<div style='text-align:center; padding:50px;'><h1>File Not Found</h1><p>Ensure <b>{file_path}</b> is in the root folder.</p></div>"
+
+    try:
+        df = pd.read_csv(file_path)
+        df.columns = [c.strip().lower() for c in df.columns]
+        schedule = df.groupby('timeslot')['course_id'].apply(list).to_dict()
+        slots = sorted(schedule.keys())
+    except Exception as e:
+        return f"<h1>Error processing CSV</h1><p>{str(e)}</p>"
+
+    # Define palette with local paths
+    palette_config = [
+        {"bg": "#FFB7B2", "path": "grade.png"},
+        {"bg": "#FFDAC1", "path": "maths.png"},
+        {"bg": "#FFF9AA", "path": "notebook.png"},
+        {"bg": "#E2F0CB", "path": "notes.png"},
+        {"bg": "#B5EAD7", "path": "notebooks.png"},
+        {"bg": "#C7CEEA", "path": "back-to-school.png"},
+        {"bg": "#E0BBE4", "path": "book.png"},
+        {"bg": "#FF9AA2", "icon": "📚"}
+    ]
+
+    html = """
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #fdfdfd; border-radius: 15px;">
+        <div style="text-align: center; margin-bottom: 30px; border-bottom: 3px dashed #ddd; padding-bottom: 20px;">
+            <h1 style="color: #6c5ce7; font-size: 2.5em; margin: 0;">🏫 SCHOOL TIMETABLE</h1>
+            <p style="color: #a29bfe; font-weight: bold;">Exam Scheduling Dashboard • Greedy Algorithm</p>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+    """
+
+    for i, slot_id in enumerate(slots):
+        style = palette_config[i % len(palette_config)]
+        courses = schedule[slot_id]
+        
+        # Convert image to Base64 to ensure it loads in any environment
+        visual_element = ""
+        if "path" in style:
+            b64_data = get_base64_image(style["path"])
+            if b64_data:
+                visual_element = f'<img src="{b64_data}" style="height: 35px; width: auto; object-fit: contain;">'
+            else:
+                # Fallback if file is missing
+                visual_element = f'<span style="font-size: 0.7em; color: red;">Img Missing</span>'
+        else:
+            visual_element = f'<span style="font-size: 1.8em;">{style["icon"]}</span>'
+        
+        html += f"""
+        <div style="background-color: {style['bg']}; border-radius: 15px; padding: 15px; box-shadow: 5px 5px 0px rgba(0,0,0,0.05);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <span style="font-weight: 900; color: #444; font-size: 1.2em;">SLOT {slot_id}</span>
+                {visual_element}
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+        """
+        
+        for course in courses:
+            html += f"""
+                <div style="background: rgba(255, 255, 255, 0.6); padding: 10px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.05);">
+                    <div style="font-weight: bold; color: #2d3436;">{course}</div>
+                    <div style="font-size: 0.75em; color: #636e72; text-transform: uppercase; letter-spacing: 1px;">Scheduled</div>
+                </div>
+            """
+        html += "</div></div>"
+
+    html += "</div></div>"
+    return html
+
+with gr.Blocks(title="Pastel Exam Dashboard", css="footer {display: none !important}") as demo:
+    output_html = gr.HTML(value=get_timetable_html())
+    refresh_btn = gr.Button("🔄 Refresh Timetable", variant="primary")
+    refresh_btn.click(fn=get_timetable_html, outputs=output_html)
+
+if __name__ == "__main__":
+    demo.launch()
