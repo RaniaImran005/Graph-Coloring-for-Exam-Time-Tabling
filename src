@@ -1,0 +1,135 @@
+import os
+import pandas as pd
+import networkx as nx
+from itertools import combinations
+import random
+import matplotlib.pyplot as plt
+
+def build_conflict_graph(enrollments_file):
+    df = pd.read_csv(enrollments_file)
+    G = nx.Graph()
+    courses = df['course_id'].unique()
+    G.add_nodes_from(courses)
+    for student, group in df.groupby('student_id'):
+        enrolled = group['course_id'].tolist()
+        if len(enrolled) >= 2:
+            for a, b in combinations(enrolled, 2):
+                G.add_edge(a, b)
+    return G
+
+def greedy_coloring(G):
+    coloring = nx.coloring.greedy_color(G, strategy='largest_first')
+    return coloring
+
+def tabu_search(G, initial_coloring, max_iter=1000, tabu_size=50):
+    current = initial_coloring.copy()
+    if sum(1 for u, v in G.edges() if current[u] == current[v]) > 0:
+        print("Initial coloring has conflicts, Tabu search cannot guarantee optimality from here.")
+    best = current.copy()
+    best_slots = len(set(current.values()))
+    tabu_list = []
+    for i in range(max_iter):
+        nodes = list(G.nodes())
+        current_colors = sorted(list(set(current.values())))
+        best_move_coloring = None
+        best_move_slots = float('inf')
+        for node in random.sample(nodes, min(len(nodes), 10)):
+            original_color = current[node]
+            candidate_colors = set(current_colors) - {original_color}
+            for new_color in candidate_colors:
+                new_coloring = current.copy()
+                new_coloring[node] = new_color
+                conflicts = sum(1 for u, v in G.edges() if new_coloring[u] == new_coloring[v])
+                if conflicts == 0:
+                    slots = len(set(new_coloring.values()))
+                    is_tabu = (node, new_color) in tabu_list
+                    is_aspiration = slots < best_slots
+                    if not is_tabu or is_aspiration:
+                        if slots < best_move_slots:
+                            best_move_slots = slots
+                            best_move_coloring = new_coloring
+                        if slots < best_slots:
+                            best_slots = slots
+                            best = new_coloring
+        if best_move_coloring:
+            move_node = node
+            new_color_value = best_move_coloring[move_node]
+            current = best_move_coloring
+            tabu_list.append((move_node, new_color_value))
+            if len(tabu_list) > tabu_size:
+                tabu_list.pop(0)
+    return best
+
+def visualize_graph(G, coloring, title="Exam Timetable Coloring"):
+    colors = [coloring[node] for node in G.nodes()]
+    num_colors = len(set(colors))
+    pos = nx.spring_layout(G, seed=42, iterations=50)
+    plt.figure(figsize=(20, 15))
+    nx.draw(
+        G,
+        pos,
+        with_labels=True,
+        node_color=colors,
+        cmap=plt.cm.get_cmap('Paired', num_colors),
+        node_size=1100,
+        font_size=10,
+        font_weight='bold',
+        edge_color='gray'
+    )
+    plt.title(f"{title} (Slots Used: {num_colors})")
+    plt.savefig(f"results/{title.replace(' ', '_')}.png")
+    plt.show()
+
+os.makedirs("results", exist_ok=True)
+
+def compare_algorithms_chart(results):
+    algos = list(results.keys())
+    slots = [results[a]['timeslots'] for a in algos]
+    plt.bar(algos, slots, color=['skyblue', 'salmon'])
+    plt.title("Comparison: Greedy vs Tabu Search")
+    plt.ylabel("Number of Time Slots Used")
+    plt.savefig("results/comparison_chart.png")
+    plt.show()
+
+G = build_conflict_graph("enrollments.csv")
+greedy_result = greedy_coloring(G)
+greedy_slots = len(set(greedy_result.values()))
+print(f"Greedy Coloring used {greedy_slots} time slots.")
+
+tabu_result = tabu_search(G, greedy_result, max_iter=500)
+tabu_slots = len(set(tabu_result.values()))
+print(f"Tabu Search optimized to {tabu_slots} time slots.")
+
+visualize_graph(G, greedy_result, "Greedy Coloring")
+visualize_graph(G, tabu_result, "Tabu Search Coloring")
+
+
+# tabu_result = {course_id : timeslot}
+
+timetable = pd.DataFrame(
+    list(tabu_result.items()),
+    columns=['course_id', 'timeslot']
+)
+
+# Force safe string conversion
+timetable['course_id'] = timetable['course_id'].apply(str)
+
+# Group courses by timeslot
+timetable_grouped = (
+    timetable
+    .groupby('timeslot', sort=True)['course_id']
+    .apply(list)
+    .reset_index()
+)
+
+# Convert list -> comma-separated string
+timetable_grouped['course_id'] = timetable_grouped['course_id'].apply(
+    lambda lst: ', '.join(sorted(lst))
+)
+
+# Save
+timetable_grouped.to_csv("results/timetable_output.csv", index=False)
+
+# Print like your example
+for _, row in timetable_grouped.iterrows():
+    print(f"{row['timeslot']}\t{row['course_id']}")
